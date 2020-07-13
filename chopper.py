@@ -6,18 +6,35 @@ import re
 from functools import partial
 from pathlib import Path
 
+# TODO: Parallelize this
+def chop_by_size(df, group_size, filename_part=""):
+    i = 1
+    df_dict = {}
+    
+    # Creates dfs of up to group_size rows and
+    # return dict of unique file naming info and filtered df
+    for start in range(0, df.shape[0], group_size):
+        output_df = df.iloc[start : start + group_size]
+        copy_filename_part = f"{filename_part}{i}"
+        df_dict[copy_filename_part] = output_df
+        i += 1
+    return df_dict
 
-def clean_filename_parts(filename_part):
-    return re.sub(r"[^\w\-. ]", "", filename_part)
 
-
+# Handles a single df filter operation
 def chop_by_columns_process(filter_df, df, column_list, group_size):
     df_dict = {}
+    
+    # Multi-column split shouild be like val1_val2_val3_etc
     filename_part_df = filter_df.apply(
         lambda x: "_".join(x.dropna().astype(str).values), axis=1
     )
     filename_part = filename_part_df.to_string(index=False)
+    
+    # Inner join on filter_df to get filtered result
     output_df = pd.merge(df, filter_df, on=column_list, how="inner")
+    
+    # Send to chop_by_size if group_size was set to a valid value
     if group_size > 0:
         filename_part = f"{filename_part}_"
         df_dict_update = chop_by_size(output_df, group_size, filename_part)
@@ -37,10 +54,14 @@ def chop_by_columns(df, columns_to_split, group_size=0):
     df_dict = {}
     filter_dfs = []
 
+    # Each row is it's own filter_df. 
+    # We'll use pd.merge to inner join each to the main df.
     for i, row in all_filters.iterrows():
         filter_df = all_filters.loc[i:i, :]
         filter_dfs.append(filter_df)
 
+    # Split df for each unique combo of vals in specified column.
+    # Returns a list of dicts with unique file naming info and filtered df.
     with mp.Pool() as pool:
         df_dict_list = pool.map(
             partial(
@@ -52,21 +73,15 @@ def chop_by_columns(df, columns_to_split, group_size=0):
             filter_dfs,
         )
 
+    # Merge dicts into one.
     for df_dict_update in df_dict_list:
         df_dict.update(df_dict_update)
 
     return df_dict
 
 
-def chop_by_size(df, group_size, filename_part=""):
-    i = 1
-    df_dict = {}
-    for start in range(0, df.shape[0], group_size):
-        output_df = df.iloc[start : start + group_size]
-        copy_filename_part = f"{filename_part}{i}"
-        df_dict[copy_filename_part] = output_df
-        i += 1
-    return df_dict
+def clean_filename_parts(filename_part):
+    return re.sub(r"[^\w\-. ]", "", filename_part)
 
 
 def save_file(filename_part_df_tuple, destination, prefix):
@@ -97,7 +112,7 @@ What is your file's separator?
 
     sep_choice = input()
 
-    sep = ","
+    sep = "," # Default
     if sep_choice == "2":
         sep = "\t"
     elif sep_choice == "3":
@@ -129,7 +144,7 @@ Would you like to split by values in one or more columns?
 
     cols_choice = input()
 
-    split_by_columns = False
+    split_by_columns = False # Default
     if cols_choice == "2":
         split_by_columns = True
         df.columns = df.columns.str.strip()
@@ -149,8 +164,8 @@ Would you like to limit file size by number of rows?
 
     size_choice = input()
 
-    split_by_size = False
-    group_size = 0
+    split_by_size = False # Default
+    group_size = 0 # Default. group_size <= 0 will bypass split_by_size.
     if size_choice == "2":
         split_by_size = True
         print("\nMax rows per file?")
@@ -158,6 +173,7 @@ Would you like to limit file size by number of rows?
 
     print("Splitting file. Please wait...")
 
+    # split_by_columns will direct output to split_by_size if group_size > 0
     if split_by_columns:
         df_dict = chop_by_columns(df, columns_to_split, group_size)
     elif split_by_size:
@@ -192,6 +208,7 @@ Will create a new directory if the specified path does not exist"""
 
     df_list = df_dict.items()
 
+    # Save all dfs as CSVs in the destination folder.
     with mp.Pool() as pool:
         pool.map(partial(save_file, destination=destination, prefix=prefix), df_list)
 
