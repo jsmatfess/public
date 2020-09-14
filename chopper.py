@@ -118,7 +118,7 @@ What is your file's separator?
     elif sep_choice == "3":
         sep = input("Type out your custom delimiter, please!\n")
 
-    df = pd.read_csv(input_file, sep=sep)
+    df = pd.read_csv(input_file, sep=sep, keep_default_na=False)
 
     print(
         """
